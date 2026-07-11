@@ -1,0 +1,16 @@
+import { readFile, writeFile, copyFile } from "node:fs/promises";
+import { resolve } from "node:path";
+const root=resolve(import.meta.dirname,".."),dist=resolve(root,"dist");
+const index=await readFile(resolve(dist,"index.html"),"utf8");
+const cssPath=index.match(/href="\.\/(assets\/[^\"]+\.css)"/)?.[1];
+const jsPath=index.match(/src="\.\/(assets\/[^\"]+\.js)"/)?.[1];
+if(!cssPath||!jsPath)throw new Error("Build assets not found");
+const [css,appJs,pdfJs,workerJs,logo]=await Promise.all([readFile(resolve(dist,cssPath),"utf8"),readFile(resolve(dist,jsPath),"utf8"),readFile(resolve(root,"public/vendor/pdfjs/pdf.min.js"),"utf8"),readFile(resolve(root,"public/vendor/pdfjs/pdf.worker.min.js"),"utf8"),readFile(resolve(root,"public/cat-logo.png"))]);
+const safeWorker=JSON.stringify(workerJs).replaceAll("</script","<\\/script").replaceAll("<!--","<\\!--");
+const logoData=`data:image/png;base64,${logo.toString("base64")}`;
+const patchedApp=appJs.replaceAll("./cat-logo.png",logoData).replaceAll("./downloads/SAO-Toolkit-by-MSN-Offline.html","#offline-copy").replaceAll("</script","<\\/script");
+const html=`<!doctype html><html lang="th"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="description" content="SAO Toolkit by MSN Offline"><meta name="referrer" content="no-referrer"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline' blob:; style-src 'unsafe-inline'; img-src data: blob:; worker-src blob:; connect-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'"><title>SAO Toolkit by MSN — Offline</title><style>${css}</style></head><body><div id="root"></div><script>window.__PDF_WORKER_SOURCE__=${safeWorker};</script><script>${pdfJs.replaceAll("</script","<\\/script")}</script><script type="module">${patchedApp}</script></body></html>`;
+const output=resolve(root,"SAO-Toolkit-by-MSN-Offline.html");
+await writeFile(output,html);
+await copyFile(output,resolve(root,"public/downloads/SAO-Toolkit-by-MSN-Offline.html"));
+console.log(`Created ${output}`);
