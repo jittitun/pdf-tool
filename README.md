@@ -1,15 +1,17 @@
 # SAO Toolkit by MSN
 
-Private PDF Tools ธีมแมวสีเหลือง–ส้มแบบมินิมอล ประมวลผล PDF ภายใน Browser โดยไม่อัปโหลดเอกสารไปยัง Server
+Private PDF Tools ธีมแมวสีเหลือง-ส้มแบบมินิมอล ประมวลผล PDF ภายใน Browser โดยไม่อัปโหลดเอกสารไปยัง Server
+
+เครื่องมือในชุดนี้: แยก รวม เลือกหน้า จัดเรียง ดึงหน้า หมุนหน้าที่เลือก ใส่ลายน้ำภาษาไทย และบีบอัด PDF
 
 ## เผยแพร่ GitHub Pages
 
 1. อัปโหลดไฟล์ทั้งหมดในโฟลเดอร์นี้ไปยัง Repository
-2. ไปที่ Settings → Pages
+2. ไปที่ Settings > Pages
 3. เลือก Source เป็น GitHub Actions
 4. รอ Workflow ทำงานสำเร็จ
 
-เว็บไซต์มีปุ่มดาวน์โหลด `SAO-Toolkit-by-MSN-Offline.html` เพื่อให้ผู้ใช้นำไปเปิดแบบ Offline ได้
+เว็บไซต์มีปุ่มดาวน์โหลด `SAO-Toolkit-by-MSN-Offline.html` เพื่อให้ผู้ใช้นำไปเปิดแบบ Offline ได้ โดยไฟล์ออฟไลน์ไม่ต้องเชื่อมต่ออินเทอร์เน็ต
 
 ## พัฒนาและสร้างไฟล์
 

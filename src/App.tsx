@@ -13,11 +13,14 @@ import {
   LockKeyhole,
   Menu,
   Merge,
+  Minimize2,
   MousePointer2,
+  RotateCcw,
   RotateCw,
   Scissors,
   ShieldCheck,
   Sparkles,
+  Stamp,
   Trash2,
   UploadCloud,
   X,
@@ -25,7 +28,7 @@ import {
 import { PDFDocument, degrees } from "pdf-lib";
 import JSZip from "jszip";
 
-type ToolId = "split" | "merge" | "combine" | "reorder" | "extract";
+type ToolId = "split" | "merge" | "combine" | "reorder" | "extract" | "rotate" | "watermark" | "compress";
 type SourceFile = { id: string; file: File; bytes: Uint8Array; pageCount: number };
 type PageItem = {
   id: string;
@@ -100,6 +103,9 @@ const tools: Array<{
   { id: "combine", title: "เลือกหน้ามารวม", description: "หยิบหน้าจากหลายไฟล์มาสร้างเอกสารใหม่", icon: Layers3, accent: "teal" },
   { id: "reorder", title: "จัดเรียงหน้า", description: "ลากสลับ หมุน หรือลบหน้าเอกสาร", icon: GripVertical, accent: "orange" },
   { id: "extract", title: "ดึงหน้าที่ต้องการ", description: "เลือกเฉพาะหน้าแล้วส่งออกเป็น PDF ใหม่", icon: MousePointer2, accent: "pink" },
+  { id: "rotate", title: "หมุนหน้าที่เลือก", description: "หมุนเฉพาะหน้าหรือช่วงหน้าที่กำหนด", icon: RotateCw, accent: "violet" },
+  { id: "watermark", title: "ใส่ลายน้ำ", description: "เพิ่มลายน้ำภาษาไทยลงในหน้าที่ต้องการ", icon: Stamp, accent: "blue" },
+  { id: "compress", title: "บีบอัด PDF", description: "ลดขนาดไฟล์สแกนสำหรับส่งต่อและจัดเก็บ", icon: Minimize2, accent: "teal" },
 ];
 
 const toolCopy: Record<ToolId, { heading: string; body: string; multiple: boolean }> = {
@@ -108,6 +114,9 @@ const toolCopy: Record<ToolId, { heading: string; body: string; multiple: boolea
   combine: { heading: "เลือกหน้ามารวม", body: "เพิ่มหลายไฟล์ เลือกหน้า และจัดลำดับเป็นเอกสารใหม่", multiple: true },
   reorder: { heading: "จัดเรียงหน้า PDF", body: "ลากหน้าเพื่อสลับลำดับ หมุน หรือลบหน้าที่ไม่ต้องการ", multiple: false },
   extract: { heading: "ดึงหน้าที่ต้องการ", body: "คลิกเลือกหน้าที่ต้องการ แล้วส่งออกเป็น PDF ใหม่", multiple: false },
+  rotate: { heading: "หมุนหน้าที่เลือก", body: "ระบุหน้าหรือช่วงหน้า แล้วเลือกองศาที่ต้องการหมุน", multiple: false },
+  watermark: { heading: "ใส่ลายน้ำ", body: "เพิ่มข้อความลายน้ำภาษาไทยหรืออังกฤษลงในหน้าที่กำหนด", multiple: false },
+  compress: { heading: "บีบอัด PDF", body: "ลดขนาด PDF โดยแปลงแต่ละหน้าเป็นภาพ JPEG", multiple: false },
 };
 
 function formatBytes(bytes: number) {
@@ -164,6 +173,27 @@ function parseRanges(value: string, max: number): number[][] {
   });
 }
 
+function parsePageSet(value: string, max: number) {
+  return new Set(parseRanges(value, max).flat());
+}
+
+function createWatermark(text: string, color: string) {
+  const canvas = document.createElement("canvas");
+  const context = canvas.getContext("2d");
+  if (!context) throw new Error("ไม่สามารถสร้างลายน้ำได้");
+  context.font = '700 72px "Noto Sans Thai", Tahoma, sans-serif';
+  const width = Math.ceil(context.measureText(text).width + 48);
+  canvas.width = Math.max(120, width);
+  canvas.height = 120;
+  const next = canvas.getContext("2d")!;
+  next.font = '700 72px "Noto Sans Thai", Tahoma, sans-serif';
+  next.fillStyle = color;
+  next.textAlign = "center";
+  next.textBaseline = "middle";
+  next.fillText(text, canvas.width / 2, canvas.height / 2);
+  return canvas.toDataURL("image/png");
+}
+
 export default function Home() {
   const [activeTool, setActiveTool] = useState<ToolId | null>(null);
   const [files, setFiles] = useState<SourceFile[]>([]);
@@ -171,6 +201,11 @@ export default function Home() {
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [rangeText, setRangeText] = useState("1");
   const [outputName, setOutputName] = useState("เอกสารใหม่");
+  const [watermarkText, setWatermarkText] = useState("สำเนา");
+  const [watermarkOpacity, setWatermarkOpacity] = useState(0.22);
+  const [watermarkAngle, setWatermarkAngle] = useState(-35);
+  const [watermarkColor, setWatermarkColor] = useState("#d94b3d");
+  const [compressionQuality, setCompressionQuality] = useState(0.68);
   const [busy, setBusy] = useState(false);
   const [progress, setProgress] = useState(0);
   const [error, setError] = useState("");
@@ -283,7 +318,7 @@ export default function Home() {
   };
 
   const togglePage = (id: string) => {
-    if (activeTool !== "extract" && activeTool !== "combine") return;
+    if (activeTool !== "extract" && activeTool !== "combine" && activeTool !== "rotate") return;
     setSelected((current) => {
       const next = new Set(current);
       if (next.has(id)) next.delete(id);
@@ -292,8 +327,8 @@ export default function Home() {
     });
   };
 
-  const rotatePage = (id: string) => {
-    setPages((current) => current.map((page) => page.id === id ? { ...page, rotation: (page.rotation + 90) % 360 } : page));
+  const rotatePage = (id: string, direction = 90) => {
+    setPages((current) => current.map((page) => page.id === id ? { ...page, rotation: (page.rotation + direction + 360) % 360 } : page));
   };
 
   const removePage = (id: string) => {
@@ -342,6 +377,59 @@ export default function Home() {
         const ordered = files.flatMap((file) => pages.filter((page) => page.sourceId === file.id));
         const bytes = await buildFromPages(ordered);
         downloadBlob(new Blob([bytes as BlobPart], { type: "application/pdf" }), name);
+      } else if (activeTool === "rotate") {
+        const bytes = await buildFromPages(pages);
+        downloadBlob(new Blob([bytes as BlobPart], { type: "application/pdf" }), name);
+      } else if (activeTool === "watermark") {
+        if (!watermarkText.trim()) throw new Error("กรุณาระบุข้อความลายน้ำ");
+        const source = await PDFDocument.load(files[0].bytes);
+        const targets = parsePageSet(rangeText, source.getPageCount());
+        const image = await source.embedPng(createWatermark(watermarkText.trim(), watermarkColor));
+        source.getPages().forEach((page, index) => {
+          if (!targets.has(index)) return;
+          const { width, height } = page.getSize();
+          const scale = Math.min((width * 0.62) / image.width, 1.2);
+          const imageWidth = image.width * scale;
+          const imageHeight = image.height * scale;
+          page.drawImage(image, {
+            x: (width - imageWidth) / 2,
+            y: (height - imageHeight) / 2,
+            width: imageWidth,
+            height: imageHeight,
+            opacity: watermarkOpacity,
+            rotate: degrees(watermarkAngle),
+          });
+        });
+        const bytes = await source.save({ useObjectStreams: true });
+        downloadBlob(new Blob([bytes as BlobPart], { type: "application/pdf" }), name);
+      } else if (activeTool === "compress") {
+        const pdfjs = await loadPdfJs();
+        pdfjs.GlobalWorkerOptions.workerSrc = getPdfWorkerUrl();
+        const task = pdfjs.getDocument({ data: files[0].bytes.slice() });
+        const rendered = await task.promise;
+        const source = await PDFDocument.load(files[0].bytes);
+        const output = await PDFDocument.create();
+        for (let index = 0; index < source.getPageCount(); index++) {
+          const sourcePage = source.getPage(index);
+          const { width, height } = sourcePage.getSize();
+          const pdfPage = await rendered.getPage(index + 1);
+          const viewport = pdfPage.getViewport({ scale: 1.35 });
+          const canvas = document.createElement("canvas");
+          canvas.width = Math.ceil(viewport.width);
+          canvas.height = Math.ceil(viewport.height);
+          const context = canvas.getContext("2d", { alpha: false });
+          if (!context) throw new Error("ไม่สามารถบีบอัดหน้าเอกสารได้");
+          context.fillStyle = "#ffffff";
+          context.fillRect(0, 0, canvas.width, canvas.height);
+          await pdfPage.render({ canvas, canvasContext: context, viewport }).promise;
+          const jpg = await output.embedJpg(canvas.toDataURL("image/jpeg", compressionQuality));
+          const page = output.addPage([width, height]);
+          page.drawImage(jpg, { x: 0, y: 0, width, height });
+          setProgress(15 + Math.round(((index + 1) / source.getPageCount()) * 75));
+        }
+        await task.destroy();
+        const bytes = await output.save({ useObjectStreams: true });
+        downloadBlob(new Blob([bytes as BlobPart], { type: "application/pdf" }), name);
       } else {
         const chosen = activeTool === "extract" || activeTool === "combine"
           ? pages.filter((page) => selected.has(page.id))
@@ -364,6 +452,15 @@ export default function Home() {
     if (activeTool === "extract" || activeTool === "combine") return selected.size > 0;
     return true;
   }, [activeTool, busy, files.length, selected.size]);
+
+  const watermarkPreviewPages = useMemo(() => {
+    if (activeTool !== "watermark" || !files[0]) return new Set<number>();
+    try {
+      return parsePageSet(rangeText, files[0].pageCount);
+    } catch {
+      return new Set<number>();
+    }
+  }, [activeTool, files, rangeText]);
 
   if (activeTool) {
     const copy = toolCopy[activeTool];
@@ -427,7 +524,7 @@ export default function Home() {
                 ) : (
                   <div className="page-panel">
                     <div className="panel-heading">
-                      <div><h2>ภาพตัวอย่างเอกสาร</h2><p>{activeTool === "extract" || activeTool === "combine" ? "คลิกเพื่อเลือกหน้า จากนั้นลากเพื่อจัดลำดับ" : "ลากเพื่อเรียงหน้า ใช้ปุ่มบนการ์ดเพื่อหมุนหรือลบ"}</p></div>
+                      <div><h2>ภาพตัวอย่างเอกสาร</h2><p>{activeTool === "rotate" ? "คลิกเลือกหน้า แล้วกดหมุนซ้ายหรือขวาบนหน้านั้น" : activeTool === "watermark" ? "ปรับลายน้ำทางด้านขวา แล้วตรวจผลบนแต่ละหน้าก่อนดาวน์โหลด" : activeTool === "extract" || activeTool === "combine" ? "คลิกเพื่อเลือกหน้า จากนั้นลากเพื่อจัดลำดับ" : "ลากเพื่อเรียงหน้า ใช้ปุ่มบนการ์ดเพื่อหมุนหรือลบ"}</p></div>
                       <span>{pages.length} หน้า</span>
                     </div>
                     {activeTool === "combine" && <button className="add-file-button inline" onClick={() => inputRef.current?.click()}><UploadCloud size={17} /> เพิ่ม PDF อีกไฟล์</button>}
@@ -442,10 +539,12 @@ export default function Home() {
                         >
                           <div className="page-image-wrap">
                             <img src={page.thumbnail} alt={`หน้า ${page.pageIndex + 1}`} style={{ transform: `rotate(${page.rotation}deg)` }} />
-                            {(activeTool === "extract" || activeTool === "combine") && <span className="select-check">{selected.has(page.id) && <Check size={15} strokeWidth={3} />}</span>}
-                            {(activeTool === "reorder" || activeTool === "combine") && <div className="page-actions">
-                              <button onClick={(e) => { e.stopPropagation(); rotatePage(page.id); }} aria-label="หมุนหน้า"><RotateCw size={15} /></button>
-                              <button onClick={(e) => { e.stopPropagation(); removePage(page.id); }} aria-label="ลบหน้า"><Trash2 size={15} /></button>
+                            {activeTool === "watermark" && watermarkPreviewPages.has(page.pageIndex) && watermarkText.trim() && <span className="watermark-preview" style={{ color: watermarkColor, opacity: watermarkOpacity, transform: `translate(-50%, -50%) rotate(${watermarkAngle}deg)` }}>{watermarkText}</span>}
+                            {(activeTool === "extract" || activeTool === "combine" || activeTool === "rotate") && <span className="select-check">{selected.has(page.id) && <Check size={15} strokeWidth={3} />}</span>}
+                            {(activeTool === "reorder" || activeTool === "combine" || (activeTool === "rotate" && selected.has(page.id))) && <div className={`page-actions ${activeTool === "rotate" ? "always-visible" : ""}`}>
+                              {activeTool === "rotate" && <button onClick={(e) => { e.stopPropagation(); rotatePage(page.id, -90); }} aria-label="หมุนซ้าย"><RotateCcw size={15} /></button>}
+                              <button onClick={(e) => { e.stopPropagation(); rotatePage(page.id); }} aria-label="หมุนขวา"><RotateCw size={15} /></button>
+                              {activeTool !== "rotate" && <button onClick={(e) => { e.stopPropagation(); removePage(page.id); }} aria-label="ลบหน้า"><Trash2 size={15} /></button>}
                             </div>}
                           </div>
                           <div className="page-label"><GripVertical size={15} /><span>หน้า {page.pageIndex + 1}</span><small>{activeTool === "combine" ? safeName(page.sourceName).slice(0, 14) : `ลำดับ ${index + 1}`}</small></div>
@@ -459,6 +558,9 @@ export default function Home() {
               <aside className="export-panel">
                 <div className="export-title"><Sparkles size={18} /><h2>ตั้งค่าผลลัพธ์</h2></div>
                 {activeTool === "split" && <label className="field-label">ช่วงหน้าที่ต้องการแยก<input value={rangeText} onChange={(e) => setRangeText(e.target.value)} placeholder="เช่น 1-3, 4-6, 7" /><small>คั่นแต่ละไฟล์ด้วยเครื่องหมายจุลภาค</small></label>}
+                {activeTool === "rotate" && <div className="selection-summary"><span>หน้าที่เลือก</span><b>{selected.size} หน้า</b><button onClick={() => setSelected(new Set(pages.map((page) => page.id)))}>เลือกทั้งหมด</button></div>}
+                {activeTool === "watermark" && <><label className="field-label">ข้อความลายน้ำ<input value={watermarkText} onChange={(e) => setWatermarkText(e.target.value)} maxLength={80} /></label><label className="field-label">หน้าที่ใส่ลายน้ำ<input value={rangeText} onChange={(e) => setRangeText(e.target.value)} placeholder="เช่น 1-5" /></label><div className="option-grid"><label className="field-label">ความโปร่งใส<input type="range" min="0.08" max="0.7" step="0.02" value={watermarkOpacity} onChange={(e) => setWatermarkOpacity(Number(e.target.value))} /><small>{Math.round(watermarkOpacity * 100)}%</small></label><label className="field-label">มุม<input type="number" min="-90" max="90" value={watermarkAngle} onChange={(e) => setWatermarkAngle(Number(e.target.value))} /></label></div><label className="field-label color-field">สีลายน้ำ<input type="color" value={watermarkColor} onChange={(e) => setWatermarkColor(e.target.value)} /></label></>}
+                {activeTool === "compress" && <><label className="field-label">คุณภาพภาพ<input type="range" min="0.35" max="0.9" step="0.05" value={compressionQuality} onChange={(e) => setCompressionQuality(Number(e.target.value))} /><small>{Math.round(compressionQuality * 100)}% · ค่าน้อยลง ไฟล์จะเล็กลง</small></label><div className="tool-note">เหมาะกับ PDF สแกน เอกสารผลลัพธ์จะเป็นภาพและไม่สามารถค้นหาหรือเลือกข้อความได้</div></>}
                 {(activeTool === "extract" || activeTool === "combine") && <div className="selection-summary"><span>หน้าที่เลือก</span><b>{selected.size} หน้า</b><button onClick={() => setSelected(new Set(pages.map((page) => page.id)))}>เลือกทั้งหมด</button></div>}
                 <label className="field-label">ชื่อไฟล์ผลลัพธ์<div className="filename-input"><input value={outputName} onChange={(e) => setOutputName(e.target.value)} /><span>.pdf</span></div></label>
                 <div className="result-summary">

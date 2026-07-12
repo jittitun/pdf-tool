@@ -1,4 +1,4 @@
-import { readFile, writeFile, copyFile } from "node:fs/promises";
+import { readFile, writeFile, copyFile, mkdir } from "node:fs/promises";
 import { resolve } from "node:path";
 const root=resolve(import.meta.dirname,".."),dist=resolve(root,"dist");
 const index=await readFile(resolve(dist,"index.html"),"utf8");
@@ -13,4 +13,6 @@ const html=`<!doctype html><html lang="th"><head><meta charset="UTF-8"><meta nam
 const output=resolve(root,"SAO-Toolkit-by-MSN-Offline.html");
 await writeFile(output,html);
 await copyFile(output,resolve(root,"public/downloads/SAO-Toolkit-by-MSN-Offline.html"));
+await mkdir(resolve(dist,"downloads"),{recursive:true});
+await copyFile(output,resolve(dist,"downloads/SAO-Toolkit-by-MSN-Offline.html"));
 console.log(`Created ${output}`);
